@@ -1,32 +1,45 @@
 # 1. State tuning 简介
-在Transformer主导的时代，RWKV作为一种纯RNN模型拥有固定大小的state，可以Transformer难以实现的事情。例如State tuning正是基于这一特性，通过对初始state的优化而非修改模型权重，实现轻量级而高效的模型定制。这种方法相当于"最彻底的prompt tuning"，具有极强的迁移能力，甚至能通过这种状态调整实现alignment。研究表明，经过良好调优的小型RWKV模型在特定任务上可超越更大的基础模型^[Xiao, L., Zhiyuan, L., et al. State tuning: State-based test-time scaling on RWKV-7. Preprint at https://doi.org/10.48550/arXiv.2504.05097 (2025).]。
+在Transformer主导的时代，RWKV作为一种纯RNN模型拥有固定大小的state，可以Transformer难以实现的事情。例如State tuning正是基于这一特性，通过对初始state的优化而非修改模型权重，实现轻量级而高效的模型定制。这种方法相当于"最彻底的prompt tuning"，具有极强的迁移能力，甚至能通过这种状态调整实现alignment。研究表明，经过良好调优的小型RWKV模型在特定任务上可超越更大的基础模型[^1][^2]。
 
-RWKV-7模型的核心是一个状态矩阵 $S_t \in \mathbb{R}^{N \times N}$ ，其中 $N=C/H$，$C$ 和 $H$ 分别对应模型的维度和Head数。状态随时间演化的规则为：
+RWKV-7模型的核心是一个状态矩阵 $S_t \in \mathbb{R}^{N \times N}$ ，其中 $N=C/H$， $C$ 和 $H$ 分别对应模型的维度和Head数。状态随时间演化的规则为：
+
 $$
 S_t = S_{t-1} \left( \mathrm{diag}(w_t) - k_t^T (a_t \otimes k_t) \right) + v_t^T k_t
 $$
+
 式中 $t$ 为当前时间步， $w_t,k_t, v_t, a_t$ 是输入文本基于预训练的权重计算而来的矢量。模型的输出为：
+
 $$
 y=\left(r_t \cdot S_t \right).\text{sum}(\dim=-1)
 $$
+
 其中 $r_t \in \mathbb{R}^N$ 为接受矢量，控制对过去信息的接受程度。
+
 State tuning 的目标为特定任务初始化最优的状态矩阵。训练时，在时间步 $t$ 下根据目标数据集的输入文本和预训练的权重计算矢量 $w_t,k_t, v_t, a_t$ 来计算状态矩阵 $S_t$ 的损失值，再通过交叉熵等方法优化 $S_t$ 以最小化特定任务下的损失。这种方法计算高效，它保留了编码在预训练权重中的一般知识，同时允许通过状态矩阵进行特定于任务的自适应。
 为了进一步增强模型的容量，State tuning还有一种使用核函数方法来放大状态维度大小的动态调整方法，可以使状态矩阵 $S_t \in \mathbb{R}^{N \times N}$ 适配一个更高维的空间 $\mathbb{R}^{M \times M}(M>N)$ 。
-这种方法首先随机采样或者数据驱动选择一组支持向量 $\{u_1, u_2, \cdots, u_M\} \subset \mathbb{R}^N$ ，然后基于高斯核函数$K(u,v) = \exp(-\gamma \Vert u-v \Vert ^2)$ 来实现对矢量 $w_t,k_t, v_t, a_t, r_t$ 来调整维度，其中 $\gamma$ 为大于0的超参数。以 $w_t$ 为例，其对应的核特征矢量为：
+
+这种方法首先随机采样或者数据驱动选择一组支持向量 $\{u_1, u_2, \cdots, u_M\} \subset \mathbb{R}^N$ ，然后基于高斯核函数 $K(u,v) = \exp(-\gamma \Vert u-v \Vert ^2)$ 来实现对矢量 $w_t,k_t, v_t, a_t, r_t$ 来调整维度，其中 $\gamma$ 为大于0的超参数。以 $w_t$ 为例，其对应的核特征矢量为：
+
 $$
 \phi(w_t) = \left(K(w_t, u_1), K(w_t, u_2), \cdots, K(w_M, u_M) \right) \in \mathbb{R}^M
 $$
+
 于是基于核转换方法的状态演化规则和输出则为：
+
 $$
 S_t = S_{t-1} \left( \mathrm{diag}(\phi(w_t)) - \phi(k_t)^T (\phi(a_t) \otimes \phi(k_t)) \right) + \phi(v_t)^T \phi(k_t)\in \mathbb{R}^{M\times M}
 $$
+
 $$
 y=\left(\phi(r_t） \cdot S_t \right).\text{sum}(\dim=-1)\in \mathbb{R}^{M}
 $$
+
 最后再通过一个固定的投影矩阵 $Q\in \mathbb{R}^{N \times M}$ 来将输出恢复为原始维度：
+
 $$
 y_\text{projected} = Qy\in \mathbb{R}^{N}
 $$
+
 这种核函数的方法可以进一步增强模型的表达能力。
 此外 State tuning 进一步还有DBP增强tuning和测试时间缩放的方法，前者使用去相关的反向传播来加快收敛速度和更好的推理，后者通过更大的模型指导来适应推理时的状态。
 
@@ -86,7 +99,8 @@ python /home/rwkv250918/tys/RWKV-PEFT/train.py --load_model $load_model \
 ```
 
 10轮训练的损失曲线如下图所示，前中期损失下降迅速，表明模型快速学习到了猫娘的语言风格，后期损失值缓慢收敛至1.3左右，这时模型的性格已经基本定型。
-![[Pasted image 20251223181031.png]]
+<img width="2678" height="1956" alt="Pasted image 20251223181031" src="https://github.com/user-attachments/assets/437da0b3-ba61-4703-b9a9-a11b3af29800" />
+
 
 # 3. RWKV pip 交谈
 测试使用jupyter notebook用[RWKV pip](https://www.rwkv.cn/tutorials/intermediate/RWKVpip)方法实现对话系统。为了便于阅读和使用，我们在源代码的基础上做了一些调整。
@@ -201,4 +215,8 @@ chat('你好呀')
 Assistant: 喵~主人好呀！*轻轻蹭了蹭主人的手* 今天想和主人玩什么呀？我最喜欢陪主人玩耍了呢！要不要一起去阳台上晒太阳？或者我们可以一起画画，我最擅长用爪子画小猫咪了哦！*开心地摇着尾巴* 主人今天看起来心情很好呢，是不是有什么开心的事情发生啦？
 """
 ```
+
 可以看出微调后的模型不仅学会了猫娘的说话语气，还学会了细腻的动作，十分可爱。表明模型可以在保持对话自然流畅的同时，成功塑造出鲜明的角色形象。
+
+[^1]:Peng, B., et al. RWKV: Reinventing RNNs for the transformer era. Preprint at https://doi.org/10.48550/arXiv.2305.13048 (2023).
+[^2]:Xiao, L., Zhiyuan, L., et al. State tuning: State-based test-time scaling on RWKV-7. Preprint at https://doi.org/10.48550/arXiv.2504.05097 (2025).
