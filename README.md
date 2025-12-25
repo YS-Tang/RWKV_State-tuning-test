@@ -65,37 +65,43 @@ epoch_save=1 # 保存state的频率
 epoch_steps=1000 # 每个训练轮次的步数，增加会拉长单个epoch的训练时间
 ctx_len=1024 # 微调模型的上下文长度
   
-python /home/rwkv250918/tys/RWKV-PEFT/train.py --load_model $load_model \
---proj_dir $proj_dir \
+micro_bsz=8 # 微批次大小，根据数据量和显存大小调整
+epoch_save=1 # 保存state的频率
+epoch_steps=1000 # 每个训练轮次的步数，增加会拉长单个epoch的训练时间
+ctx_len=1024 # 微调模型的上下文长度
+vocab_size=65536 # 词表大小，根据数据集调整
+data_type='jsonl' # 训练语料的文件格式
+epoch_count=10 # 总训练轮次，state tuning不需要过多反复训练
+lr_init=1e-3 # 初始学习率
+lr_final=1e-5 # 最终学习率
+devices=2 # 使用的GPU数量
+strategy='deepspeed_stage_1' # 训练策略
+grad_cp=1 # 梯度累积步数，0训练更快但需更多显存，1训练较慢但节省显存
+my_testing="x070" # 选择RWKV模型版本，v7选x070，v6选x060
+peft_type="state" # 微调训练类型，state tuning微调填state
+op="fla" # 选择算子，state tuning仅支持fla算子
+
+python /home/rwkv250918/tys/RWKV-PEFT/train.py --load_model $load_model \ --proj_dir $proj_dir \
 --data_file $data_file \
-# 词表大小
---vocab_size 65536 \
-# 训练语料的文件格式
---data_type jsonl \
+--vocab_size $vocab_size \
+--data_type $data_type \
 --n_layer $n_layer \
 --n_embd $n_embd \
 --ctx_len $ctx_len \
 --micro_bsz $micro_bsz \
 --epoch_steps $epoch_steps \
-# 总训练轮次，state tuning不需要过多反复训练
---epoch_count 10 \
+--epoch_count $epoch_count \
 --epoch_save $epoch_save \
---lr_init 1e-3 \
---lr_final 1e-5 \
+--lr_init $lr_init \
+--lr_final $lr_final \
 --accelerator gpu \
 --precision bf16 \
-# 使用的GPU数量
---devices 2 \
-# lightning 训练策略参数
---strategy deepspeed_stage_1 \
-# 梯度累积步数，0训练更快但需更多显存，1训练较慢但节省显存
---grad_cp 1 \
-# 训练的RWKV模型版本，v7选x070，v6选x060
---my_testing "x070" \
-# 微调训练类型，state tuning微调填state
---peft state \
-# 选择算子，state tuning仅支持fla算子
---op fla
+--devices $devices \
+--strategy $strategy \
+--grad_cp $grad_cp \
+--my_testing $my_testing \
+--peft $peft_type \
+--op $op
 ```
 
 10轮训练的损失曲线如下图所示，前中期损失下降迅速，表明模型快速学习到了猫娘的语言风格，后期损失值缓慢收敛至1.3左右，这时模型的性格已经基本定型。
@@ -220,3 +226,4 @@ Assistant: 喵~主人好呀！*轻轻蹭了蹭主人的手* 今天想和主人�
 
 [^1]:Peng, B., et al. RWKV: Reinventing RNNs for the transformer era. Preprint at https://doi.org/10.48550/arXiv.2305.13048 (2023).
 [^2]:Xiao, L., Zhiyuan, L., et al. State tuning: State-based test-time scaling on RWKV-7. Preprint at https://doi.org/10.48550/arXiv.2504.05097 (2025).
+
